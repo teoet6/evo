@@ -6,7 +6,7 @@
 
 #define SIMULATIONS_PER_GENERATION 300
 #define NUM_CELLS                  1000
-#define NUM_GENES                  12
+#define NUM_GENES                  4
 #define WEIGHT_AMPLITUDE           4.0f
 #define MUTATION_RARITY            10000
 #define POISON_DEATH_RARITY        1
@@ -60,13 +60,15 @@ Petri petri;
 
 int is_food_position(int y, int x) {
     return x < FIELD_X / 16;
+    return x < FIELD_X / 32 || x >= FIELD_X - FIELD_X / 32;
 }
 
 int is_poison_position(int y, int x) {
+    return 0;
     if      (simulation_step < SIMULATIONS_PER_GENERATION * 1 / 4) return 0;
     else if (simulation_step < SIMULATIONS_PER_GENERATION * 2 / 4) return x <  FIELD_X / 2;
-    else if (simulation_step < SIMULATIONS_PER_GENERATION * 3 / 4) return 0;
-    else                                                           return x >= FIELD_X / 2;
+    else                                                           return 0;
+    // else                                                           return x >= FIELD_X / 2;
 }
 
 
@@ -106,6 +108,11 @@ void populate() {
     program_state = SIMULATE;
 }
 
+float gene_val_to_weight(int16_t val) {
+    // printf("%f\n", (float)val / (float)0xffff);
+    return ((float)val / (float)0xffff) * 2.f * WEIGHT_AMPLITUDE;
+}
+
 void simulate() {
     Petri new_petri;
 
@@ -140,7 +147,7 @@ void simulate() {
         for (int j = 0; j < NUM_GENES; ++j) {
             const auto src = petri.cells[i].genome[j].src;
             const auto dst = petri.cells[i].genome[j].dst;
-            const float weight = ((float)petri.cells[i].genome[j].val / (float)0xffff - .5f) * 2.f * WEIGHT_AMPLITUDE;
+            const float weight = gene_val_to_weight(petri.cells[i].genome[j].val);
 
             new_petri.cells[i].neurons[dst] += petri.cells[i].neurons[src] * weight;
         }
@@ -202,6 +209,7 @@ void maybe_mutate(Gene *g) {
     for (int i = 0; i < 16; ++i) {
         if (rand() % MUTATION_RARITY == 0) {
             g->val ^= 1 << i;
+            g->val &= 0xffff;
         }
     }
 }
@@ -323,8 +331,35 @@ void keydown(int key) {
 void keyup(int key) {
 }
 
-void mousedown(int button) { }
+void mousedown(int button) {
+}
 
 void mouseup(int button) {
-    std::cout << "Mouse clicked at " << mouse_x << " " << mouse_y << " from " << window_w << " " << window_h << std::endl;
+    const float cell_w = std::min(window_w / FIELD_X, window_h / FIELD_Y);
+    const int y = mouse_y / cell_w;
+    const int x = mouse_x / cell_w;
+
+    printf("%d %d\n", y, x);
+
+    if (y < 0 || y >= FIELD_Y || x < 0 || x >= FIELD_X) return;
+
+    const int cell_idx = petri.field[y][x];
+    if (cell_idx == -1) return;
+
+#define PRINTE(E) printf("%d %s\n", E, #E)
+    PRINTE(INPUT_ALWAYS_ONE);
+    PRINTE(INPUT_POS_X);
+    PRINTE(INPUT_POS_Y);
+    PRINTE(INPUT_TIME);
+    PRINTE(OUTPUT_MOVE_X);
+    PRINTE(OUTPUT_MOVE_Y);
+    PRINTE(INTERNAL_A);
+#undef PRINTE
+
+    for (int i = 0; i < NUM_GENES; ++i) {
+        const Gene gene = petri.cells[cell_idx].genome[i];
+        printf("%02d -> %02d %.2f\n", gene.src, gene.dst, gene_val_to_weight(gene.val));
+    }
+
+    printf("\n");
 }
