@@ -1,8 +1,8 @@
 #include "pishtov.h"
 
-#include <cstdint>
-#include <cstdlib>
-#include <vector>
+#include <stdint.h>
+#include <stdlib.h>
+#include <math.h>
 
 #define SIMULATIONS_PER_GENERATION 300
 #define NUM_CELLS                  1000
@@ -13,6 +13,7 @@
 #define FIELD_X                    128
 #define FIELD_Y                    128
 
+typedef enum Neuron_Id Neuron_Id;
 enum Neuron_Id {
     INPUT_ALWAYS_ONE,
     INPUT_POS_X,
@@ -27,23 +28,27 @@ enum Neuron_Id {
     NUM_NEURONS,
 };
 
+typedef enum Program_State Program_State;
 enum Program_State {
     POPULATE,
     SIMULATE,
-    SELECT,
+    SELECT_SURVIVORS,
 };
 
+typedef struct Gene Gene;
 struct Gene {
     uint8_t src;
     uint8_t dst;
     int16_t val;
 };
 
+typedef struct Cell Cell;
 struct Cell {
     Gene  genome [NUM_GENES];
     float neurons[NUM_NEURONS];
 };
 
+typedef struct Petri Petri;
 struct Petri {
     Cell cells[NUM_CELLS];
     int field[FIELD_Y][FIELD_X];
@@ -133,7 +138,7 @@ void simulate() {
 
     for (int i = 0; i < FIELD_Y; ++i) {
         for (int j = 0; j < FIELD_X; ++j) {
-            const auto cell_idx = petri.field[i][j];
+            const int cell_idx = petri.field[i][j];
             if (cell_idx != -1) {
                 petri.cells[cell_idx].neurons[INPUT_ALWAYS_ONE] = 1;
                 petri.cells[cell_idx].neurons[INPUT_POS_X] = ((float)j / FIELD_X - .5f) * 2.f;
@@ -145,8 +150,8 @@ void simulate() {
 
     for (int i = 0; i < NUM_CELLS; ++i) {
         for (int j = 0; j < NUM_GENES; ++j) {
-            const auto src = petri.cells[i].genome[j].src;
-            const auto dst = petri.cells[i].genome[j].dst;
+            const uint8_t src = petri.cells[i].genome[j].src;
+            const uint8_t dst = petri.cells[i].genome[j].dst;
             const float weight = gene_val_to_weight(petri.cells[i].genome[j].val);
 
             new_petri.cells[i].neurons[dst] += petri.cells[i].neurons[src] * weight;
@@ -162,7 +167,7 @@ void simulate() {
 
     for (int i = 0; i < FIELD_Y; ++i) {
         for (int j = 0; j < FIELD_X; ++j) {
-            const auto cell_idx = petri.field[i][j];
+            const int cell_idx = petri.field[i][j];
             if (cell_idx != -1) {
                 int dx = 0, dy = 0;
 
@@ -189,7 +194,7 @@ void simulate() {
 
     simulation_step++;
     if (simulation_step == SIMULATIONS_PER_GENERATION) {
-        program_state = SELECT;
+        program_state = SELECT_SURVIVORS;
     }
 }
 
@@ -214,7 +219,7 @@ void maybe_mutate(Gene *g) {
     }
 }
 
-void select() {
+void select_survivors() {
     Petri new_petri;
     for (int i = 0; i < FIELD_Y; ++i) {
         for(int j = 0; j < FIELD_X; ++j) {
@@ -227,7 +232,7 @@ void select() {
     for (int i = 0; i < FIELD_Y; ++i) {
         for (int j = 0; j < FIELD_X; ++j) {
             if (!is_food_position(i, j)) continue;
-            const auto cell_idx = petri.field[i][j];
+            const int cell_idx = petri.field[i][j];
             if (cell_idx != -1) {
                 new_petri.cells[num_survive++] = petri.cells[cell_idx];
             }
@@ -254,9 +259,9 @@ void select() {
 void update() {
     for (int i = 0; i < program_speed; ++i) {
         switch (program_state) {
-        case POPULATE: populate(); break;
-        case SIMULATE: simulate(); break;
-        case SELECT:   select();   break;
+        case POPULATE:           populate(); break;
+        case SIMULATE:           simulate(); break;
+        case SELECT_SURVIVORS:   select_survivors();   break;
         }
     }
 }
@@ -286,29 +291,41 @@ uint32_t hue_to_rgb(uint8_t hue) {
     return r << 16 | g << 8 | b;
 }
 
-void draw() {
-    const float cell_w = std::min(window_w / FIELD_X, window_h / FIELD_Y);
+void fill_color_hex(uint32_t hex) {
+    int a = hex >> 24 & 0xff;
+    int r = hex >> 16 & 0xff;
+    int g = hex >>  8 & 0xff;
+    int b = hex       & 0xff;
 
-    fill_color(0x808080);
+    fill_color[0] = (float)r / 255;
+    fill_color[1] = (float)g / 255;
+    fill_color[2] = (float)b / 255;
+    fill_color[3] = 1 - (float)a / 255;
+}
+
+void draw() {
+    const float cell_w = fmin(window_w / FIELD_X, window_h / FIELD_Y);
+
+    fill_color_hex(0x808080);
     fill_rect(0, 0, window_w, window_h);
 
-    fill_color(0xffffff);
+    fill_color_hex(0xffffff);
     fill_rect(0, 0, FIELD_X * cell_w, FIELD_Y * cell_w);
 
     for (int i = 0; i < FIELD_Y; ++i) {
         for (int j = 0; j < FIELD_X; ++j) {
             if (is_food_position(i, j)) {
-                fill_color(0xe0ffe0);
+                fill_color_hex(0xe0ffe0);
                 fill_rect(j * cell_w, i * cell_w, cell_w, cell_w);
             }
             if (is_poison_position(i, j)) {
-                fill_color(0xffe0e0);
+                fill_color_hex(0xffe0e0);
                 fill_rect(j * cell_w, i * cell_w, cell_w, cell_w);
             }
             if (petri.field[i][j] != -1) {
-                const auto hue = get_genome_hue(petri.cells[petri.field[i][j]].genome);
-                const auto rgb = hue_to_rgb(hue);
-                fill_color(rgb);
+                const uint32_t hue = get_genome_hue(petri.cells[petri.field[i][j]].genome);
+                const uint32_t rgb = hue_to_rgb(hue);
+                fill_color_hex(rgb);
                 fill_circle(j * cell_w + cell_w / 2, i * cell_w + cell_w / 2, cell_w / 2);
             }
         }
@@ -316,15 +333,15 @@ void draw() {
 }
 
 void keydown(int key) {
-    std::cout << "Keydown " << key << std::endl;
+    printf("Keydown %d\n", key);
     if (key == 38 && program_speed < 256) {
         if (program_speed) program_speed *= 2;
         else               program_speed  = 1;
-        std::cout << "Program speed " << program_speed << "x" << std::endl;
+        printf("Program speed %dx\n", program_speed);
     }
     if (key == 40 && program_speed) {
         program_speed /= 2;
-        std::cout << "Program speed " << program_speed << "x" << std::endl;
+        printf("Program speed %dx\n", program_speed);
     }
 }
 
@@ -335,7 +352,7 @@ void mousedown(int button) {
 }
 
 void mouseup(int button) {
-    const float cell_w = std::min(window_w / FIELD_X, window_h / FIELD_Y);
+    const float cell_w = fmin(window_w / FIELD_X, window_h / FIELD_Y);
     const int y = mouse_y / cell_w;
     const int x = mouse_x / cell_w;
 
